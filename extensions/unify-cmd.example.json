@@ -1,0 +1,27 @@
+{
+  "agents": {
+    "claude": {
+      "enabled": true,
+      "globalDir": "~/.claude/commands",
+      "projectDir": ".claude/commands"
+    },
+    "opencode": {
+      "enabled": true,
+      "globalDir": "~/.config/opencode/commands",
+      "projectDir": ".opencode/commands"
+    },
+    "codex": {
+      "enabled": true,
+      "globalDir": "~/.codex/prompts",
+      "projectDir": null
+    },
+    "gemini": {
+      "enabled": true,
+      "globalDir": "~/.gemini/commands",
+      "projectDir": null
+    }
+  },
+  "custom": [],
+  "labelFormat": "[{scope}] ({agent}) | {description}",
+  "prefixFormat": "{agent}:{name}"
+}

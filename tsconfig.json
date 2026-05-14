@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "paths": {
+      "@mariozechner/pi-coding-agent": [
+        "/home/bhd/.nvm/versions/node/v24.15.0/lib/node_modules/@mariozechner/pi-coding-agent"
+      ]
+    }
+  },
+  "include": ["extensions/**/*.ts", "scripts/**/*.ts"],
+  "exclude": ["node_modules", "**/*.test.ts", "**/vitest.config.ts"]
+}
