@@ -75,11 +75,13 @@ function scanAll(
 ): ExternalCommand[] {
 	const opts = scanOpts(cfg);
 	const commands: ExternalCommand[] = [];
-	for (const dir of resolveGlobalRoots(cfg)) {
-		commands.push(...adapter.scan(dir, "global", opts));
-	}
+	// Project roots first so they win the "first wins" dedupe in registerAll —
+	// project-specific commands should override globals when names collide.
 	for (const dir of resolveProjectRoots(cfg, cwd)) {
 		commands.push(...adapter.scan(dir, "project", opts));
+	}
+	for (const dir of resolveGlobalRoots(cfg)) {
+		commands.push(...adapter.scan(dir, "global", opts));
 	}
 	return commands;
 }
