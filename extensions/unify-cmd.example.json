@@ -3,22 +3,30 @@
     "claude": {
       "enabled": true,
       "globalDir": "~/.claude/commands",
-      "projectDir": ".claude/commands"
+      "projectDir": ".claude/commands",
+      "recursive": true
     },
     "opencode": {
       "enabled": true,
-      "globalDir": "~/.config/opencode/commands",
-      "projectDir": ".opencode/commands"
+      "globalDirs": [
+        "~/.config/opencode/commands",
+        "~/.config/opencode/command",
+        "~/.config/opencode/profiles/default/commands"
+      ],
+      "projectDirs": [".opencode/commands", ".opencode/command"],
+      "recursive": true
     },
     "codex": {
       "enabled": true,
       "globalDir": "~/.codex/prompts",
-      "projectDir": null
+      "projectDir": null,
+      "recursive": true
     },
     "gemini": {
       "enabled": true,
       "globalDir": "~/.gemini/commands",
-      "projectDir": null
+      "projectDir": null,
+      "recursive": true
     }
   },
   "custom": [],

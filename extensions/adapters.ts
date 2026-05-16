@@ -9,16 +9,27 @@ import {
 	readdirSync,
 	readFileSync,
 	existsSync,
-	statSync,
+	type Dirent,
 } from "node:fs";
-import { join, extname, basename } from "node:path";
+import { join, extname, basename, relative, dirname, sep } from "node:path";
 import type { ExternalCommand } from "./types";
 
 // ─── Adapter Interface ────────────────────────────────────────────
 
+export interface ScanOptions {
+	/** Recurse into subdirectories. Default false. */
+	recursive?: boolean;
+	/** Separator used to flatten nested paths into command names. Default "__". */
+	nameSeparator?: string;
+}
+
 export interface CommandAdapter {
 	readonly agentName: string;
-	scan(dir: string, scope: "global" | "project"): ExternalCommand[];
+	scan(
+		dir: string,
+		scope: "global" | "project",
+		options?: ScanOptions,
+	): ExternalCommand[];
 }
 
 // ─── Shared Parsers ───────────────────────────────────────────────
@@ -62,39 +73,81 @@ export function parseGeminiToml(raw: string): {
 
 // ─── Directory Scanner ────────────────────────────────────────────
 
+/**
+ * Compute the flat command name for a file discovered during scanning.
+ *
+ * For top-level files this is just the basename without extension. For
+ * nested files (when recursive scan is enabled), the relative path from
+ * the scan root is joined by `separator`.
+ *
+ * `bkfw/pr-resolve.md` (root: `~/.opencode/commands`, sep: `__`) →
+ * `bkfw__pr-resolve`.
+ */
+function commandNameFromPath(
+	root: string,
+	filePath: string,
+	separator: string,
+): string {
+	const rel = relative(root, filePath);
+	const ext = extname(rel);
+	const noExt = rel.slice(0, rel.length - ext.length);
+	if (!noExt.includes(sep)) return noExt;
+	return noExt.split(sep).join(separator);
+}
+
 function scanDir(
-	dir: string,
+	root: string,
 	agent: string,
 	scope: "global" | "project",
 	fileExts: string[],
+	options: ScanOptions = {},
 ): ExternalCommand[] {
-	if (!existsSync(dir)) return [];
+	if (!existsSync(root)) return [];
 
+	const { recursive = false, nameSeparator = "__" } = options;
 	const commands: ExternalCommand[] = [];
 
-	try {
-		const entries = readdirSync(dir, { withFileTypes: true });
+	const walk = (dir: string) => {
+		let entries: Dirent[];
+		try {
+			entries = readdirSync(dir, { withFileTypes: true }) as Dirent[];
+		} catch {
+			return;
+		}
+
 		for (const entry of entries) {
-			if (entry.isDirectory()) continue;
+			const full = join(dir, entry.name);
+			if (entry.isDirectory()) {
+				if (recursive) walk(full);
+				continue;
+			}
+			if (!entry.isFile()) continue;
 			const ext = extname(entry.name);
 			if (!fileExts.includes(ext)) continue;
 
-			const filePath = join(dir, entry.name);
-			const name = basename(entry.name, ext);
-			const content = readFileSync(filePath, "utf-8");
+			let content: string;
+			try {
+				content = readFileSync(full, "utf-8");
+			} catch {
+				// Skip unreadable files (permissions, races, etc.) — don't abort
+				// the whole scan over a single bad entry.
+				continue;
+			}
+			const name = recursive
+				? commandNameFromPath(root, full, nameSeparator)
+				: basename(entry.name, ext);
 
 			commands.push({
 				name,
 				content,
-				source: { agent, scope, filePath },
+				source: { agent, scope, filePath: full },
 				description: undefined,
 				argumentHint: undefined,
 			});
 		}
-	} catch {
-		// dir not readable — skip
-	}
+	};
 
+	walk(root);
 	return commands;
 }
 
@@ -105,8 +158,12 @@ function scanDir(
 abstract class YamlFrontmatterAdapter implements CommandAdapter {
 	abstract readonly agentName: string;
 
-	scan(dir: string, scope: "global" | "project"): ExternalCommand[] {
-		const raw = scanDir(dir, this.agentName, scope, [".md"]);
+	scan(
+		dir: string,
+		scope: "global" | "project",
+		options?: ScanOptions,
+	): ExternalCommand[] {
+		const raw = scanDir(dir, this.agentName, scope, [".md"], options);
 		return raw.map((cmd) => {
 			const { frontmatter, body } = parseYamlFrontmatter(cmd.content);
 			return {
@@ -143,8 +200,12 @@ export class CodexAdapter extends YamlFrontmatterAdapter {
 export class GeminiAdapter implements CommandAdapter {
 	readonly agentName = "gemini";
 
-	scan(dir: string, scope: "global" | "project"): ExternalCommand[] {
-		const raw = scanDir(dir, this.agentName, scope, [".md", ".toml"]);
+	scan(
+		dir: string,
+		scope: "global" | "project",
+		options?: ScanOptions,
+	): ExternalCommand[] {
+		const raw = scanDir(dir, this.agentName, scope, [".md", ".toml"], options);
 		return raw.map((cmd) => {
 			const ext = extname(cmd.source.filePath);
 
@@ -178,10 +239,14 @@ export class CustomAdapter implements CommandAdapter {
 		private readonly format: "yaml-frontmatter" | "gemini-toml" | "raw",
 	) {}
 
-	scan(dir: string, scope: "global" | "project"): ExternalCommand[] {
+	scan(
+		dir: string,
+		scope: "global" | "project",
+		options?: ScanOptions,
+	): ExternalCommand[] {
 		const exts =
 			this.format === "gemini-toml" ? [".toml"] : [".md"];
-		const raw = scanDir(dir, this.agentName, scope, exts);
+		const raw = scanDir(dir, this.agentName, scope, exts, options);
 
 		return raw.map((cmd) => {
 			if (this.format === "gemini-toml") {
@@ -203,7 +268,9 @@ export class CustomAdapter implements CommandAdapter {
 				};
 			}
 
-			// raw: filename is description, full content is body
+			// raw: filename is description, full content is body. For recursive
+			// scans the description is the flat name, not the basename, so the
+			// user can still distinguish.
 			return {
 				...cmd,
 				description: cmd.name,

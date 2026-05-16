@@ -19,59 +19,15 @@
  */
 
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { BUILTIN_ADAPTERS, CustomAdapter } from "./adapters";
-import { loadConfig, resolveHome } from "./config";
-import { interpolateArgs, formatLabel, formatCommandName } from "./index-helpers";
+import { loadConfig } from "./config";
+import { discoverCommands, listGlobalRoots, listProjectRoots } from "./discovery";
+import {
+	interpolateArgs,
+	formatLabel,
+	formatCommandName,
+} from "./index-helpers";
 import type { UnifyCmdConfig, ExternalCommand } from "./types";
-
-// ─── Discovery ────────────────────────────────────────────────────
-
-function discoverCommands(
-	config: UnifyCmdConfig,
-	cwd: string,
-): ExternalCommand[] {
-	const commands: ExternalCommand[] = [];
-
-	// Built-in agents
-	for (const [agentName, adapterConfig] of Object.entries(config.agents)) {
-		if (!adapterConfig.enabled) continue;
-
-		const factory = BUILTIN_ADAPTERS[agentName];
-		if (!factory) continue;
-		const adapter = factory();
-
-		if (adapterConfig.globalDir) {
-			const dir = resolveHome(adapterConfig.globalDir);
-			commands.push(...adapter.scan(dir, "global"));
-		}
-
-		if (adapterConfig.projectDir && cwd) {
-			const dir = resolve(join(cwd, adapterConfig.projectDir));
-			commands.push(...adapter.scan(dir, "project"));
-		}
-	}
-
-	// Custom adapters
-	for (const customConfig of config.custom) {
-		if (!customConfig.enabled) continue;
-
-		const adapter = new CustomAdapter(customConfig.name, customConfig.format);
-
-		if (customConfig.globalDir) {
-			const dir = resolveHome(customConfig.globalDir);
-			commands.push(...adapter.scan(dir, "global"));
-		}
-
-		if (customConfig.projectDir && cwd) {
-			const dir = resolve(join(cwd, customConfig.projectDir));
-			commands.push(...adapter.scan(dir, "project"));
-		}
-	}
-
-	return commands;
-}
 
 // ─── State ────────────────────────────────────────────────────────
 
@@ -130,26 +86,34 @@ export default function (pi: ExtensionAPI) {
 					lines.push(`  ${name}: DISABLED`);
 					continue;
 				}
-				if (cfg.globalDir) {
-					const dir = resolveHome(cfg.globalDir);
-					const exists = existsSync(dir);
-					lines.push(`  ${name}: ${dir} ${exists ? "✓" : "✗ (not found)"}`);
+				const flags: string[] = [];
+				if (cfg.recursive) flags.push("recursive");
+				if (cfg.nameSeparator && cfg.nameSeparator !== "__") {
+					flags.push(`sep=${cfg.nameSeparator}`);
 				}
-				if (cfg.projectDir) {
-					const dir = resolve(join(cwd, cfg.projectDir));
+				const flagStr = flags.length ? ` [${flags.join(", ")}]` : "";
+				lines.push(`  ${name}${flagStr}:`);
+
+				for (const dir of listGlobalRoots(cfg)) {
 					const exists = existsSync(dir);
-					lines.push(`  ${name} (project): ${dir} ${exists ? "✓" : "✗"}`);
+					lines.push(`    G ${dir} ${exists ? "✓" : "✗"}`);
+				}
+				for (const dir of listProjectRoots(cfg, cwd)) {
+					const exists = existsSync(dir);
+					lines.push(`    L ${dir} ${exists ? "✓" : "✗"}`);
 				}
 			}
 
 			for (const custom of state.config.custom) {
 				if (!custom.enabled) continue;
-				if (custom.globalDir) {
-					const dir = resolveHome(custom.globalDir);
+				lines.push(`  ${custom.name} (custom, ${custom.format}):`);
+				for (const dir of listGlobalRoots(custom)) {
 					const exists = existsSync(dir);
-					lines.push(
-						`  ${custom.name} (custom, ${custom.format}): ${dir} ${exists ? "✓" : "✗"}`,
-					);
+					lines.push(`    G ${dir} ${exists ? "✓" : "✗"}`);
+				}
+				for (const dir of listProjectRoots(custom, cwd)) {
+					const exists = existsSync(dir);
+					lines.push(`    L ${dir} ${exists ? "✓" : "✗"}`);
 				}
 			}
 
@@ -167,15 +131,23 @@ export default function (pi: ExtensionAPI) {
 				`Agents:`,
 			];
 			for (const [name, cfg] of Object.entries(state.config.agents)) {
+				const globals = listGlobalRoots(cfg);
+				const projects = listProjectRoots(cfg, cwd);
 				lines.push(
-					`  ${name}: ${cfg.enabled ? "ON" : "OFF"} — global: ${cfg.globalDir || "none"}, project: ${cfg.projectDir || "none"}`,
+					`  ${name}: ${cfg.enabled ? "ON" : "OFF"} — globals: ${
+						globals.length ? globals.join(", ") : "none"
+					} — projects: ${projects.length ? projects.join(", ") : "none"}`,
 				);
 			}
 			if (state.config.custom.length > 0) {
 				lines.push("Custom sources:");
 				for (const c of state.config.custom) {
+					const globals = listGlobalRoots(c);
+					const projects = listProjectRoots(c, cwd);
 					lines.push(
-						`  ${c.name} (${c.format}): ${c.enabled ? "ON" : "OFF"} — ${c.globalDir || "none"}`,
+						`  ${c.name} (${c.format}): ${c.enabled ? "ON" : "OFF"} — globals: ${
+							globals.length ? globals.join(", ") : "none"
+						} — projects: ${projects.length ? projects.join(", ") : "none"}`,
 					);
 				}
 			}
@@ -188,10 +160,17 @@ export default function (pi: ExtensionAPI) {
 
 function registerAll(pi: ExtensionAPI, cwd: string): PluginState {
 	const config = loadConfig(cwd);
-	const commands = discoverCommands(config, cwd);
+	const discovered = discoverCommands(config, cwd);
 
-	for (const cmd of commands) {
+	const seen = new Set<string>();
+	const registered: ExternalCommand[] = [];
+	for (const cmd of discovered) {
 		const commandName = formatCommandName(config, cmd);
+		// Avoid double-registering when two roots emit the same flattened name.
+		if (seen.has(commandName)) continue;
+		seen.add(commandName);
+		registered.push(cmd);
+
 		const label = formatLabel(config, cmd);
 		const content = cmd.content;
 
@@ -204,5 +183,6 @@ function registerAll(pi: ExtensionAPI, cwd: string): PluginState {
 		});
 	}
 
-	return { config, commands };
+	// Expose only what was actually registered so list/count match runtime state.
+	return { config, commands: registered };
 }
