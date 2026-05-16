@@ -5,6 +5,7 @@
 
 import { loadConfig } from "../extensions/config";
 import { discoverCommands, listGlobalRoots, listProjectRoots } from "../extensions/discovery";
+import { BUILTIN_ADAPTERS } from "../extensions/adapters";
 
 const cwd = process.cwd();
 const config = loadConfig(cwd);
@@ -20,6 +21,13 @@ const perAgentRoots = new Map<string, { global: string[]; project: string[] }>()
 for (const [agentName, adapterConfig] of Object.entries(config.agents)) {
 	if (!adapterConfig.enabled) {
 		console.log(`  ${agentName}: DISABLED`);
+		continue;
+	}
+	// Fail loudly if an enabled built-in agent has no adapter registered —
+	// otherwise an adapter-registration regression would slip past CI.
+	if (!BUILTIN_ADAPTERS[agentName]) {
+		console.log(`  ${agentName}: ERROR — no adapter factory registered`);
+		errors++;
 		continue;
 	}
 	perAgentRoots.set(agentName, {

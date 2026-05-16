@@ -7,7 +7,7 @@
  * a pi extension context.
  */
 
-import { join, resolve } from "node:path";
+import { join, resolve, normalize } from "node:path";
 import {
 	BUILTIN_ADAPTERS,
 	CustomAdapter,
@@ -23,15 +23,23 @@ import type {
 } from "./types";
 
 /**
+ * Normalize a path so dedupe via Set catches equivalent variants
+ * (trailing slashes, `./`, double slashes). Home expansion happens upstream.
+ */
+function canonical(p: string): string {
+	return resolve(normalize(p));
+}
+
+/**
  * Collapse `globalDir` + `globalDirs[]` into a single de-duplicated, home-
  * resolved list of absolute paths.
  */
 function resolveGlobalRoots(cfg: AdapterConfig): string[] {
 	const out: string[] = [];
-	if (cfg.globalDir) out.push(resolveHome(cfg.globalDir));
+	if (cfg.globalDir) out.push(canonical(resolveHome(cfg.globalDir)));
 	if (cfg.globalDirs) {
 		for (const d of cfg.globalDirs) {
-			if (d) out.push(resolveHome(d));
+			if (d) out.push(canonical(resolveHome(d)));
 		}
 	}
 	return Array.from(new Set(out));
@@ -44,10 +52,10 @@ function resolveGlobalRoots(cfg: AdapterConfig): string[] {
 function resolveProjectRoots(cfg: AdapterConfig, cwd: string): string[] {
 	if (!cwd) return [];
 	const out: string[] = [];
-	if (cfg.projectDir) out.push(resolve(join(cwd, cfg.projectDir)));
+	if (cfg.projectDir) out.push(canonical(join(cwd, cfg.projectDir)));
 	if (cfg.projectDirs) {
 		for (const d of cfg.projectDirs) {
-			if (d) out.push(resolve(join(cwd, d)));
+			if (d) out.push(canonical(join(cwd, d)));
 		}
 	}
 	return Array.from(new Set(out));

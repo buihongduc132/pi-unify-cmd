@@ -143,10 +143,11 @@ export default function (pi: ExtensionAPI) {
 				lines.push("Custom sources:");
 				for (const c of state.config.custom) {
 					const globals = listGlobalRoots(c);
+					const projects = listProjectRoots(c, cwd);
 					lines.push(
-						`  ${c.name} (${c.format}): ${c.enabled ? "ON" : "OFF"} — ${
+						`  ${c.name} (${c.format}): ${c.enabled ? "ON" : "OFF"} — globals: ${
 							globals.length ? globals.join(", ") : "none"
-						}`,
+						} — projects: ${projects.length ? projects.join(", ") : "none"}`,
 					);
 				}
 			}
@@ -159,14 +160,16 @@ export default function (pi: ExtensionAPI) {
 
 function registerAll(pi: ExtensionAPI, cwd: string): PluginState {
 	const config = loadConfig(cwd);
-	const commands = discoverCommands(config, cwd);
+	const discovered = discoverCommands(config, cwd);
 
 	const seen = new Set<string>();
-	for (const cmd of commands) {
+	const registered: ExternalCommand[] = [];
+	for (const cmd of discovered) {
 		const commandName = formatCommandName(config, cmd);
 		// Avoid double-registering when two roots emit the same flattened name.
 		if (seen.has(commandName)) continue;
 		seen.add(commandName);
+		registered.push(cmd);
 
 		const label = formatLabel(config, cmd);
 		const content = cmd.content;
@@ -180,5 +183,6 @@ function registerAll(pi: ExtensionAPI, cwd: string): PluginState {
 		});
 	}
 
-	return { config, commands };
+	// Expose only what was actually registered so list/count match runtime state.
+	return { config, commands: registered };
 }

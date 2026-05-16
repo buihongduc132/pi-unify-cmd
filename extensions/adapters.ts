@@ -125,7 +125,14 @@ function scanDir(
 			const ext = extname(entry.name);
 			if (!fileExts.includes(ext)) continue;
 
-			const content = readFileSync(full, "utf-8");
+			let content: string;
+			try {
+				content = readFileSync(full, "utf-8");
+			} catch {
+				// Skip unreadable files (permissions, races, etc.) — don't abort
+				// the whole scan over a single bad entry.
+				continue;
+			}
 			const name = recursive
 				? commandNameFromPath(root, full, nameSeparator)
 				: basename(entry.name, ext);
