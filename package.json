@@ -1,7 +1,7 @@
 {
   "name": "pi-unify-cmd",
   "version": "0.2.0",
-  "description": "Load slash commands from Claude Code, OpenCode, Codex, and Gemini CLI into pi — adapter pattern with configurable sources and formats",
+  "description": "Load slash commands from Claude Code, OpenCode, Codex, and Gemini CLI into pi \u2014 adapter pattern with configurable sources and formats",
   "author": "buihongduc132",
   "license": "MIT",
   "type": "module",

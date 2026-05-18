@@ -4,84 +4,106 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   verify:
-    name: verify (${{ matrix.os }})
+    name: Typecheck & Test
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-
+          cache: npm
       - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test:coverage
+      - run: npm run smoke-test
 
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Test with coverage
-        run: npm run test:coverage
-
-      - name: Smoke test
-        run: npm run smoke-test
-
-  package-dry-run:
-    name: package dry-run
+  pack:
+    name: Verify Package
+    needs: [verify]
     runs-on: ubuntu-latest
-    needs: verify
-    timeout-minutes: 5
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-
+          cache: npm
       - run: npm ci
-
-      - name: Package (dry run)
-        run: npm pack --dry-run
+      - run: npm pack --dry-run
+      - name: Verify pi fields
+        run: |
+          node -e "
+            const pkg = require('./package.json');
+            if (!pkg.pi) throw new Error('Missing pi field');
+            if (!pkg.keywords.includes('pi-package')) throw new Error('Missing pi-package keyword');
+            console.log('✅ pi fields valid');
+          "
 
   publish:
-    name: publish to npm
+    name: Publish to npm
+    needs: [pack]
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    needs: package-dry-run
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    timeout-minutes: 5
-
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
           registry-url: https://registry.npmjs.org
-
       - run: npm ci
-
-      - name: Check version bump
-        id: check
+      - name: Determine npm tag
+        id: tag
         run: |
-          CURRENT=$(npm view pi-unify-cmd version 2>/dev/null || echo "0.0.0")
-          LOCAL=$(node -p "require('./package.json').version")
-          echo "current=$CURRENT local=$LOCAL"
-          if [ "$CURRENT" = "$LOCAL" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          if [[ "$VERSION" == *"-"* ]]; then TAG="next"
+          elif [[ "$VERSION" == *"rc"* ]]; then TAG="rc"
+          else TAG="latest"
           fi
-
-      - name: Publish
-        if: steps.check.outputs.skip == 'false'
-        run: npm publish
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "📌 Publishing v${VERSION} as @${TAG}"
+      - name: Verify version consistency
+        run: |
+          PKG_VER=$(node -p "require('./package.json').version")
+          TAG_VER="${GITHUB_REF#refs/tags/v}"
+          [ "$PKG_VER" = "$TAG_VER" ] || (echo "❌ Version mismatch" && exit 1)
+      - run: npm publish --provenance --access public --tag ${{ steps.tag.outputs.tag }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  release:
+    name: GitHub Release
+    needs: [publish]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Generate release notes
+        id: notes
+        run: |
+          PREV=$(git tag --sort=-version:refname | head -2 | tail -1)
+          NOTES=$(git log ${PREV}..HEAD --pretty=format:"- %s" 2>/dev/null | head -30 || echo "Initial release")
+          echo "notes<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$NOTES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+      - uses: softprops/action-gh-release@v2
+        with:
+          body: ${{ steps.notes.outputs.notes }}
