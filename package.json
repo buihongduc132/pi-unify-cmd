@@ -23,7 +23,8 @@
     "codex",
     "gemini-cli",
     "slash-commands",
-    "adapter-pattern"
+    "adapter-pattern",
+    "command-loader"
   ],
   "files": [
     "extensions/**/*.ts",

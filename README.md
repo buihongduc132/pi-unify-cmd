@@ -1,19 +1,90 @@
 # pi-unify-cmd
 
-Load slash commands from **Claude Code**, **OpenCode**, **Codex**, and **Gemini CLI** into [pi](https://github.com/mariozechner/pi-coding-agent) — using the adapter pattern.
+[![npm version](https://img.shields.io/npm/v/pi-unify-cmd.svg?style=flat-square)](https://www.npmjs.com/package/pi-unify-cmd)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
+[![pi extension](https://img.shields.io/badge/extension-pi--unify--cmd-green.svg?style=flat-square)](https://github.com/buihongduc132/pi-unify-cmd)
 
-## What it does
+Load slash commands from **Claude Code**, **OpenCode**, **Codex**, and **Gemini CLI** into [pi](https://github.com/mariozechner/pi-coding-agent) — unified via the adapter pattern.
 
-Discovers `.md` and `.toml` command files from other CLI agents and registers them as pi slash commands. Each command gets an agent-prefixed name (e.g. `/claude:review`, `/codex:opsx-apply`, `/gemini:change`) with full argument interpolation.
+## Features
+
+- **Unified slash commands** — discover `.md` and `.toml` command files from Claude Code, OpenCode, Codex, and Gemini CLI and register them as pi slash commands
+- **Agent-prefixed naming** — each command gets a clear prefix (e.g. `/claude:review`, `/codex:opsx-apply`, `/gemini:change`)
+- **Argument interpolation** — normalises all agent-specific argument syntax (`$ARGUMENTS`, `$1`, `$@`, `{{args}}`) into pi's native format
+- **Recursive scanning** — walks subdirectories and flattens nested paths into command names (e.g. `bkfw/pr-resolve.md` → `/opencode:bkfw__pr-resolve`)
+- **Multi-directory support** — combine multiple global and project-level roots per adapter
+- **Custom adapters** — add your own command sources with configurable formats (`yaml-frontmatter`, `gemini-toml`, `raw`)
+- **Zero-config defaults** — works out of the box with standard agent directory layouts
+- **Management commands** — `/unify-cmd:list`, `/unify-cmd:reload`, `/unify-cmd:scan`, `/unify-cmd:config`
 
 ## Installation
 
-```bash
-# Add to ~/.pi/agent/settings.json packages array:
-"pi-unify-cmd"
+### For Humans
 
-# Or via CLI:
+```bash
+# Via pi CLI
 pi --add-package pi-unify-cmd
+
+# Or add manually to ~/.pi/agent/settings.json packages array:
+#   "pi-unify-cmd"
+```
+
+### For AI Agents
+
+Add to your `settings.json` packages list:
+
+```json
+{
+  "packages": ["pi-unify-cmd"]
+}
+```
+
+Agent prompt reference: <https://github.com/buihongduc132/pi-unify-cmd/blob/main/README.md>
+
+### For pi git-sourced
+
+Add to `settings.json` as a git-sourced extension:
+
+```json
+{
+  "packages": [
+    {
+      "name": "pi-unify-cmd",
+      "url": "https://github.com/buihongduc132/pi-unify-cmd.git"
+    }
+  ]
+}
+```
+
+## Usage
+
+Once installed, commands from other agents are automatically discovered and available with prefixed names:
+
+```
+/claude:review          Review the current changes
+/codex:opsx-apply      Apply an OpenAI SpecX operation
+/gemini:change         Apply a Gemini CLI change
+/opencode:bkfw__pr-resolve  Resolve a PR (nested command)
+```
+
+### Argument Interpolation
+
+All agent-specific argument syntax is normalised:
+
+| Agent | Syntax | Example |
+|-------|--------|---------|
+| Claude | `$ARGUMENTS` | `Review: $ARGUMENTS` |
+| Codex | `$1`, `$@`, `${@:N:L}` | `Create $1 with $@` |
+| Gemini | `{{args}}` | `Run: {{args}}` |
+| Pi | `$1`, `$@`, `${@:N:L}` | `Build $1 ${@:2}` |
+
+### Management Commands
+
+```
+/unify-cmd:list    — List all discovered commands
+/unify-cmd:reload  — Rescan all directories
+/unify-cmd:scan    — Show directory discovery details
+/unify-cmd:config  — Show current configuration
 ```
 
 ## Supported Agents
@@ -25,19 +96,6 @@ pi --add-package pi-unify-cmd
 | Codex | YAML frontmatter | `~/.codex/prompts/` | — |
 | Gemini | TOML + YAML frontmatter | `~/.gemini/commands/` | — |
 | Custom | Configurable | Configurable | Configurable |
-
-All built-in adapters default to `recursive: true`, so nested command files (e.g. `bkfw/pr-resolve.md`, `ralph-init/00-config.md`) are discovered too. Nested paths are flattened into pi command names with `__` by default — `bkfw/pr-resolve.md` becomes `/opencode:bkfw__pr-resolve`.
-
-## Argument Interpolation
-
-All agent-specific argument syntax is normalized:
-
-| Agent | Syntax | Example |
-|-------|--------|---------|
-| Claude | `$ARGUMENTS` | `Review: $ARGUMENTS` |
-| Codex | `$1`, `$@`, `${@:N:L}` | `Create $1 with $@` |
-| Gemini | `{{args}}` | `Run: {{args}}` |
-| Pi | `$1`, `$@`, `${@:N:L}` | `Build $1 ${@:2}` |
 
 ## Configuration
 
@@ -84,7 +142,7 @@ All agent-specific argument syntax is normalized:
 | Option | Description | Default |
 |--------|-------------|---------|
 | `agents.*.enabled` | Enable/disable agent | `true` |
-| `agents.*.globalDir` | Single global commands directory (back-compat) | agent-specific |
+| `agents.*.globalDir` | Single global commands directory | agent-specific |
 | `agents.*.globalDirs` | List of global commands directories (combined with `globalDir`, deduped) | agent-specific |
 | `agents.*.projectDir` | Single project-level commands directory | agent-specific |
 | `agents.*.projectDirs` | List of project-level commands directories | agent-specific |
@@ -99,15 +157,6 @@ All agent-specific argument syntax is normalized:
 ### Custom Adapters
 
 Add your own command sources with `format: "yaml-frontmatter" | "gemini-toml" | "raw"`.
-
-## Management Commands
-
-```
-/unify-cmd:list    — List all discovered commands
-/unify-cmd:reload  — Rescan all directories
-/unify-cmd:scan    — Show directory discovery details
-/unify-cmd:config  — Show current configuration
-```
 
 ## Architecture
 
@@ -126,4 +175,4 @@ Adapter pattern: each agent has an adapter that knows how to scan its directory 
 
 ## License
 
-MIT
+[MIT](LICENSE)
