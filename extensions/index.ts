@@ -5,6 +5,11 @@
  * then registers them as pi slash commands. Uses adapter pattern to handle
  * different file formats (YAML frontmatter, Gemini TOML, raw).
  *
+ * OpenCode commands are mirrored as symlinks into pi's native prompts dir so
+ * pi's engine surfaces them as first-class slash commands (when mirrorToPrompts
+ * is enabled, default for opencode). The legacy `opencode:<name>` registration
+ * is suppressed for mirrored commands.
+ *
  * Config:
  *   Global:   ~/.pi/agent/unify-cmd.json
  *   Project:  .unify-cmd.json
@@ -14,33 +19,39 @@
  *   /unify-cmd:reload  — rescan all directories
  *   /unify-cmd:scan    — show directory discovery details
  *   /unify-cmd:config  — show current config
+ *   /unify-cmd:mirror  — show mirror status / clean / refresh
  *
  * @see types.ts for config schema
  */
 
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { loadConfig } from "./config";
+import { loadConfig, resolveHome } from "./config";
 import { discoverCommands, listGlobalRoots, listProjectRoots } from "./discovery";
 import {
 	interpolateArgs,
 	formatLabel,
 	formatCommandName,
 } from "./index-helpers";
+import { mirrorCommands, unmirrorCommands } from "./mirror";
 import type { UnifyCmdConfig, ExternalCommand } from "./types";
+import type { MirrorResult } from "./mirror";
 
 // ─── State ────────────────────────────────────────────────────────
 
 interface PluginState {
 	config: UnifyCmdConfig;
 	commands: ExternalCommand[];
+	mirrorResult: MirrorResult | null;
 }
 
 // ─── Extension Entry ──────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
 	const cwd = process.cwd();
-	let state: PluginState = registerAll(pi, cwd);
+	const agentDir = resolveHome("~/.pi/agent");
+	let state: PluginState = registerAll(pi, cwd, agentDir);
 
 	// ── Management commands ──────────────────────────────────────
 
@@ -68,7 +79,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("unify-cmd:reload", {
 		description: "Rescan agent directories and reload unified commands",
 		handler: async (_args, ctx) => {
-			state = registerAll(pi, cwd);
+			state = registerAll(pi, cwd, agentDir);
 			ctx.ui.notify(
 				`Reloaded ${state.commands.length} unified commands.`,
 				"info",
@@ -91,6 +102,7 @@ export default function (pi: ExtensionAPI) {
 				if (cfg.nameSeparator && cfg.nameSeparator !== "__") {
 					flags.push(`sep=${cfg.nameSeparator}`);
 				}
+				if (cfg.mirrorToPrompts) flags.push("mirror");
 				const flagStr = flags.length ? ` [${flags.join(", ")}]` : "";
 				lines.push(`  ${name}${flagStr}:`);
 
@@ -133,8 +145,9 @@ export default function (pi: ExtensionAPI) {
 			for (const [name, cfg] of Object.entries(state.config.agents)) {
 				const globals = listGlobalRoots(cfg);
 				const projects = listProjectRoots(cfg, cwd);
+				const mirror = cfg.mirrorToPrompts ? " [mirror]" : "";
 				lines.push(
-					`  ${name}: ${cfg.enabled ? "ON" : "OFF"} — globals: ${
+					`  ${name}: ${cfg.enabled ? "ON" : "OFF"}${mirror} — globals: ${
 						globals.length ? globals.join(", ") : "none"
 					} — projects: ${projects.length ? projects.join(", ") : "none"}`,
 				);
@@ -154,13 +167,110 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.notify(lines.join("\n"), "info");
 		},
 	});
+
+	pi.registerCommand("unify-cmd:mirror", {
+		description: "Show mirror status, clean symlinks, or refresh mirror",
+		handler: async (args, ctx) => {
+			const argStr = (args || "").trim();
+
+			if (argStr === "--clean") {
+				if (!state.mirrorResult) {
+					ctx.ui.notify(
+						"No mirror run yet this session — run /unify-cmd:reload first.",
+						"warning",
+					);
+					return;
+				}
+				const opencodeCmds = state.commands.filter(
+					(cmd) =>
+						cmd.source.agent === "opencode" &&
+						(state.config.agents.opencode?.mirrorToPrompts ?? false),
+				);
+				const { removed, skipped } = unmirrorCommands(opencodeCmds, {
+					agentDir,
+					cwd,
+				});
+				ctx.ui.notify(
+					`Mirror clean: ${removed} symlink(s) removed, ${skipped} skipped.`,
+					"info",
+				);
+				return;
+			}
+
+			if (argStr === "--refresh") {
+				state = registerAll(pi, cwd, agentDir);
+				formatMirrorResult(state.mirrorResult, ctx);
+				return;
+			}
+
+			// Default: show status
+			formatMirrorResult(state.mirrorResult, ctx);
+		},
+	});
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────
+
+function formatMirrorResult(
+	mirrorResult: MirrorResult | null,
+	ctx: { ui: { notify: (msg: string, type?: "error" | "info" | "warning") => void } },
+): void {
+	if (!mirrorResult) {
+		ctx.ui.notify(
+			"No mirror run yet this session — run /unify-cmd:reload first.",
+			"warning",
+		);
+		return;
+	}
+
+	const { created, reused, replaced, skipped, broken } = mirrorResult;
+	const summary = [
+		`${created.length} created`,
+		`${reused.length} reused`,
+		`${replaced.length} replaced`,
+		`${skipped.length} skipped`,
+		`${broken.length} broken`,
+	].join(", ");
+
+	ctx.ui.notify(`Mirror status: ${summary}`, "info");
 }
 
 // ─── Registration ─────────────────────────────────────────────────
 
-function registerAll(pi: ExtensionAPI, cwd: string): PluginState {
+function registerAll(
+	pi: ExtensionAPI,
+	cwd: string,
+	agentDir: string,
+): PluginState {
 	const config = loadConfig(cwd);
 	const discovered = discoverCommands(config, cwd);
+
+	// Partition opencode commands: mirror vs legacy
+	const opencodeMirrorEnabled =
+		config.agents.opencode?.mirrorToPrompts ?? false;
+	const opencodeCmds = discovered.filter(
+		(cmd) => cmd.source.agent === "opencode" && opencodeMirrorEnabled,
+	);
+
+	let mirrorResult: MirrorResult | null = null;
+	const mirroredNames = new Set<string>();
+
+	if (opencodeMirrorEnabled && opencodeCmds.length > 0) {
+		try {
+			mirrorResult = mirrorCommands(opencodeCmds, { agentDir, cwd });
+			// Collect successfully mirrored command names
+			for (const entry of [
+				...mirrorResult.created,
+				...mirrorResult.reused,
+				...mirrorResult.replaced,
+			]) {
+				mirroredNames.add(entry.name);
+			}
+		} catch {
+			// Mirror failed entirely — fall back to legacy registration
+			mirrorResult = null;
+		}
+	}
 
 	const seen = new Set<string>();
 	const registered: ExternalCommand[] = [];
@@ -169,6 +279,14 @@ function registerAll(pi: ExtensionAPI, cwd: string): PluginState {
 		// Avoid double-registering when two roots emit the same flattened name.
 		if (seen.has(commandName)) continue;
 		seen.add(commandName);
+
+		// Suppress legacy registration for mirrored opencode commands
+		if (cmd.source.agent === "opencode" && mirroredNames.has(cmd.name)) {
+			// Mirrored — pi's engine owns display; do NOT register
+			registered.push(cmd);
+			continue;
+		}
+
 		registered.push(cmd);
 
 		const label = formatLabel(config, cmd);
@@ -184,5 +302,5 @@ function registerAll(pi: ExtensionAPI, cwd: string): PluginState {
 	}
 
 	// Expose only what was actually registered so list/count match runtime state.
-	return { config, commands: registered };
+	return { config, commands: registered, mirrorResult };
 }

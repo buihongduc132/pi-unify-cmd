@@ -66,7 +66,20 @@ export function loadConfig(cwd?: string): UnifyCmdConfig {
 		}
 	}
 
-	return config as unknown as UnifyCmdConfig;
+	return normalizeConfig(config as unknown as UnifyCmdConfig);
+}
+
+/**
+ * Normalize config: ensure mirrorToPrompts is always a boolean (default false
+ * unless explicitly set in DEFAULT_CONFIG).
+ */
+function normalizeConfig(config: UnifyCmdConfig): UnifyCmdConfig {
+	for (const [name, agentCfg] of Object.entries(config.agents)) {
+		const defaultAgent = DEFAULT_CONFIG.agents[name];
+		const defaultMirror = defaultAgent?.mirrorToPrompts ?? false;
+		agentCfg.mirrorToPrompts = agentCfg.mirrorToPrompts ?? defaultMirror;
+	}
+	return config;
 }
 
 // ─── Default config writer ────────────────────────────────────────

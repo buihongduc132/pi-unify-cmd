@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-06-24
+
+### Added
+- **Symlink mirroring**: OpenCode commands are now mirrored as symlinks into pi's native prompts directory on session start. Global commands → `~/.pi/agent/prompts/<name>.md`, project commands → `<cwd>/.pi/prompts/<name>.md`. pi's engine surfaces them as first-class slash commands (e.g., `/review` instead of `/opencode:review`).
+- **`mirrorToPrompts` config flag**: Per-agent boolean flag (default `true` for opencode, `false` for others). When enabled, discovered commands are mirrored AND legacy `<agent>:<name>` registration is suppressed.
+- **`/unify-cmd:mirror` command**: Reports mirror status (created/reused/replaced/skipped/broken counts). Supports `--clean` to remove extension-managed symlinks and `--refresh` to re-run mirroring.
+- **`mirror.ts` module**: Idempotent symlink creation with relative paths, error handling (never blocks session start), skip-on-collision (never overwrites real files), replace-stale (fixes broken symlinks).
+- 11 new tests in `mirror.test.ts` covering symlink lifecycle, error handling, relative paths, and cleanup.
+
+### Changed
+- **OpenCode commands are first-class by default**: With `opencode.mirrorToPrompts: true` (new default), opencode commands are registered via pi's native prompt engine instead of the legacy `opencode:<name>` path. Users can opt out by setting `opencode.mirrorToPrompts: false`.
+- Config normalization in `config.ts`: ensures `mirrorToPrompts` is always a boolean after deep-merge.
+- `/unify-cmd:scan` and `/unify-cmd:config` now display the `mirror` flag when enabled.
+
+### Migration
+Existing configs continue to work unchanged. The new default `opencode.mirrorToPrompts: true` means opencode commands will be mirrored as native pi prompts on next session start. To retain the legacy `opencode:<name>` behavior, set `opencode.mirrorToPrompts: false` in your config.
+
 ## [0.2.0] - 2026-05-16
 
 ### Added

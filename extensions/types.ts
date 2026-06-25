@@ -50,6 +50,13 @@ export interface AdapterConfig {
 	 * Default: "__". Example: `bkfw/pr-resolve.md` → `bkfw__pr-resolve`.
 	 */
 	nameSeparator?: string;
+	/**
+	 * When true, discovered commands for this agent are mirrored as symlinks
+	 * into the matching pi prompts dir, and the legacy `<agent>:<name>`
+	 * registration is suppressed. Default: `true` for opencode, `false` for
+	 * others.
+	 */
+	mirrorToPrompts?: boolean;
 }
 
 /** Custom user-defined adapter */
@@ -83,6 +90,7 @@ export const DEFAULT_CONFIG: UnifyCmdConfig = {
 		},
 		opencode: {
 			enabled: true,
+			mirrorToPrompts: true,
 			// Three known opencode command roots:
 			//   - default global              ~/.config/opencode/commands
 			//   - historical singular alias   ~/.config/opencode/command
