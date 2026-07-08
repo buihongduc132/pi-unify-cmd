@@ -7,7 +7,6 @@ coverage/
 .sg-sha
 .sgignore
 sgconfig.yml
-.hindsight.json
 .gitnexus/
 .gitnexusignore
 .bug-hunter/
