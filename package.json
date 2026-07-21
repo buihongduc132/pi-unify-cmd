@@ -50,7 +50,7 @@
     "@mariozechner/pi-coding-agent": "*"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^3.2.1",
+    "@vitest/coverage-v8": "^4.1.10",
     "tsx": "^4.22.0",
     "typescript": "^5.8.0",
     "vitest": "^3.2.1"
